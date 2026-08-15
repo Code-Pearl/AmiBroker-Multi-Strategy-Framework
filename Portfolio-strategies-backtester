@@ -1,0 +1,107 @@
+// =========================================================
+// MULTI-STRATEGY COMBINED & COMPARISON FRAMEWORK 
+// built By code__pearl 2026
+// =========================================================
+_SECTION_BEGIN("Multi-Strategy Framework");
+
+// ---------------------------------------------------------
+// 1. USER PARAMETERS & SELECTOR
+// ---------------------------------------------------------
+Mode = ParamList("Mode", "1. Backtest Strategy|2. Individual Comparison|3. Combined Portfolio");
+Strategy = ParamList("Select Strategy to Backtest", 
+    "Larry Connors Double 7|" +
+    "Larry Connors RSI(2)|" +
+    "5-Days Down / 5-Days Up|" +
+    "Buy and Hold Benchmark");
+
+SetOption("InitialEquity", 100000); // $100k starting equity
+
+// ---------------------------------------------------------
+// 2. STRATEGY DEFINITIONS
+// ---------------------------------------------------------
+MA200 = MA( Close, 200 );
+RSI2  = RSI( 2 );
+
+// Strategy A: Double 7
+CondA_Buy  = Close > MA200 AND Close == LLV( Close, 7 );
+CondA_Sell = Close == HHV( Close, 7 );
+
+// Strategy B: Connors RSI(2)
+CondB_Buy  = Close > MA200 AND RSI2 < 10;
+CondB_Sell = Close > MA( Close, 5 );
+
+// Strategy C: 5-Days Down / 5-Days Up
+DownStreak = Sum( Close < Ref( Close, -1 ), 5 ) == 5;
+UpStreak   = Sum( Close > Ref( Close, -1 ), 5 ) == 5;
+CondC_Buy  = DownStreak;
+CondC_Sell = UpStreak;
+
+// Strategy D: Buy & Hold Benchmark
+CondD_Buy  = Status("firstbarinrange");
+CondD_Sell = Status("lastbarinrange");
+
+// Assign active strategy & dynamic position sizing
+if( Strategy == "Larry Connors Double 7" )          { Buy = CondA_Buy; Sell = CondA_Sell; TickerName = "~~Connors_Double7"; SetPositionSize( 20, spsPercentOfEquity ); }
+else if( Strategy == "Larry Connors RSI(2)" )       { Buy = CondB_Buy; Sell = CondB_Sell; TickerName = "~~Connors_RSI2";    SetPositionSize( 20, spsPercentOfEquity ); }
+else if( Strategy == "5-Days Down / 5-Days Up" )    { Buy = CondC_Buy; Sell = CondC_Sell; TickerName = "~~FiveDays_UpDown";   SetPositionSize( 20, spsPercentOfEquity ); }
+else if( Strategy == "Buy and Hold Benchmark" )     { Buy = CondD_Buy; Sell = CondD_Sell; TickerName = "~~BuyAndHold";       SetPositionSize( 100, spsPercentOfEquity ); } // Fixed: 100% allocation for benchmark
+
+// Clean trade entry/exit signals
+Buy  = ExRem( Buy, Sell );
+Sell = ExRem( Sell, Buy );
+Short = Cover = 0;
+
+// ---------------------------------------------------------
+// 3. BACKTEST ENGINE (EXPORTS EQUITY TO COMPOSITES)
+// ---------------------------------------------------------
+if( Mode == "1. Backtest Strategy" )
+{
+    SetCustomBacktestProc(""); 
+    
+    if( Status("action") == actionPortfolio )
+    {
+        bo = GetBacktesterObject();
+        bo.Backtest(); 
+        
+        // Retrieve standard AmiBroker portfolio equity array
+        eq = Foreign("~~~EQUITY", "C"); 
+        
+        // Export equity curve to composite ticker
+        AddToComposite( eq, TickerName, "X", atcFlagDeleteValues | atcFlagEnableInPortfolio );
+    }
+}
+
+// ---------------------------------------------------------
+// 4. CHART PLOTTING MODES (NORMALIZED % GROWTH & COMBINED)
+// ---------------------------------------------------------
+BaseCapital = 100000; 
+
+if( Mode == "2. Individual Comparison" )
+{
+    // Nz() prevents missing ticker data from breaking the chart
+    Eq_BH = Nz( Foreign( "~~BuyAndHold", "C" ), BaseCapital );
+    Eq_D7 = Nz( Foreign( "~~Connors_Double7", "C" ), BaseCapital );
+    Eq_R2 = Nz( Foreign( "~~Connors_RSI2", "C" ), BaseCapital );
+    Eq_5D = Nz( Foreign( "~~FiveDays_UpDown", "C" ), BaseCapital );
+
+    // Normalized to Percentage Growth (100% = Day 1 baseline)
+    Plot( (Eq_BH / BaseCapital) * 100, "Buy & Hold (%)",        colorDarkGrey, styleLine );
+    Plot( (Eq_D7 / BaseCapital) * 100, "Connors Double 7 (%)",  colorBlue,     styleLine );
+    Plot( (Eq_R2 / BaseCapital) * 100, "Connors RSI(2) (%)",   colorGreen,    styleLine );
+    Plot( (Eq_5D / BaseCapital) * 100, "5 Days Down / Up (%)", colorGold,     styleLine );
+}
+
+if( Mode == "3. Combined Portfolio" )
+{
+    Eq1 = Nz( Foreign( "~~Connors_Double7", "C" ), BaseCapital );
+    Eq2 = Nz( Foreign( "~~Connors_RSI2", "C" ), BaseCapital );
+    Eq3 = Nz( Foreign( "~~FiveDays_UpDown", "C" ), BaseCapital );
+    
+    // Average equity across the 3 strategies
+    CombinedEquity = (Eq1 + Eq2 + Eq3) / 3;
+    
+    Plot( Nz( Foreign( "~~BuyAndHold", "C" ), BaseCapital ), "Buy & Hold Benchmark ($)", colorDarkGrey, styleDashed );
+    Plot( CombinedEquity, "Combined Portfolio Equity ($)", colorBrightGreen, styleLine | styleGradient, Null, Null, 0, 0, 3 );
+}
+
+_SECTION_END();
